@@ -446,4 +446,241 @@ Compare @postgres:schema://users with @docs:file://database/user-model
 
 ---
 
+## 六、Hooks（钩子）
+
+### 核心概念
+
+**Hooks 是在 Claude Code 生命周期特定点自动执行的命令/脚本。**
+
+与依赖 LLM 决定是否执行不同，Hooks 是**确定性**的——只要条件匹配就一定会执行。
+
+### Hook 类型
+
+| 类型 | 用途 | 示例 |
+|------|------|------|
+| `command` | 执行 shell 命令 | 格式化代码、发送通知 |
+| `http` | POST 到 HTTP 端点 | 团队审计服务 |
+| `prompt` | 单轮 LLM 评估 | 需要判断力的决策 |
+| `agent` | 多轮验证（可用工具） | 检查测试是否通过 |
+
+### 生命周期事件
+
+| 事件 | 触发时机 | 可阻断？ |
+|------|----------|----------|
+| `SessionStart` | 会话开始/恢复 | 否 |
+| `UserPromptSubmit` | 用户提交提示 | 是 |
+| `PreToolUse` | 工具执行前 | 是 |
+| `PermissionRequest` | 权限请求时 | 是 |
+| `PostToolUse` | 工具执行后 | 否 |
+| `PostToolUseFailure` | 工具执行失败 | 否 |
+| `Notification` | 发送通知时 | 否 |
+| `SubagentStart/Stop` | 子 Agent 启动/停止 | Stop 可阻断 |
+| `Stop` | Claude 完成响应 | 是 |
+| `StopFailure` | API 错误结束 | 否 |
+| `ConfigChange` | 配置变更 | 是 |
+| `CwdChanged` | 工作目录变更 | 否 |
+| `FileChanged` | 监视文件变更 | 否 |
+| `PreCompact/PostCompact` | 上下文压缩前/后 | 否 |
+| `SessionEnd` | 会话终止 | 否 |
+
+### 配置位置
+
+| 位置 | 范围 | 可共享 |
+|------|------|--------|
+| `~/.claude/settings.json` | 所有项目 | 否 |
+| `.claude/settings.json` | 单个项目 | 是 |
+| `.claude/settings.local.json` | 单个项目 | 否（gitignored） |
+| Skill/Agent frontmatter | 组件激活时 | 是 |
+
+### Matcher（匹配器）
+
+用正则表达式过滤何时触发：
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [{ "type": "command", "command": "prettier --write ..." }]
+      }
+    ]
+  }
+}
+```
+
+不同事件匹配不同字段：
+- `PreToolUse/PostToolUse` → 匹配 tool 名（`Bash`, `Edit|Write`, `mcp__.*`）
+- `SessionStart` → 匹配 source（`startup`, `resume`, `clear`, `compact`）
+- `SessionEnd` → 匹配结束原因（`clear`, `logout`, `other`）
+- `Notification` → 匹配通知类型
+- `FileChanged` → 匹配文件名
+
+### 退出码行为
+
+| 退出码 | 含义 |
+|--------|------|
+| `0` | 成功，继续执行 |
+| `2` | 阻断错误（依事件而定） |
+| 其他 | 非阻断错误，记录日志 |
+
+**可阻断的事件**：`PreToolUse`, `PermissionRequest`, `UserPromptSubmit`, `Stop`, `SubagentStop`, `TeammateIdle`, `TaskCompleted`, `ConfigChange`
+
+### 常用示例
+
+#### 1. 编辑后自动格式化
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | xargs npx prettier --write"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+#### 2. 保护敏感文件
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/protect-files.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+脚本检查文件路径，匹配保护模式时 `exit 2` 阻断。
+
+#### 3. 自动批准特定权限
+```json
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\": {\"hookEventName\": \"PermissionRequest\", \"decision\": {\"behavior\": \"allow\"}}}'"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+#### 4. 桌面通知（macOS）
+```json
+{
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"Claude Code needs your attention\" with title \"Claude Code\"'"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+#### 5. Prompt-based Hook（判断力决策）
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Check if all tasks are complete. If not, respond with {\"ok\": false, \"reason\": \"what remains to be done\"}."
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+#### 6. Agent-based Hook（验证后决策）
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "Verify that all unit tests pass. Run the test suite and check the results. $ARGUMENTS",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### 环境变量
+
+| 变量 | 说明 |
+|------|------|
+| `$CLAUDE_PROJECT_DIR` | 项目根目录（用于引用脚本） |
+| `$CLAUDE_ENV_FILE` | 环境变量持久化文件（SessionStart/CwdChanged/FileChanged 可用） |
+| `$CLAUDE_CODE_REMOTE` | 远程 web 环境为 `"true"` |
+
+### 管理命令
+
+- `/hooks` - 只读浏览已配置的 hooks
+- `disableAllHooks: true` - 禁用所有 hooks
+
+### HTTP Hooks
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://localhost:8080/hooks/tool-use",
+            "headers": { "Authorization": "Bearer $MY_TOKEN" },
+            "allowedEnvVars": ["MY_TOKEN"]
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- 2xx 空响应 = 成功
+- 2xx JSON 响应 = 按 JSON 格式解析决策
+- 非 2xx = 非阻断错误
+
+---
+
 *笔记更新: 2026-03-26*
