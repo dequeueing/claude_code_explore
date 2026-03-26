@@ -1,62 +1,271 @@
-# Claude Code 文档结构观察
+# Claude Code 学习笔记
 
-## 笔记更新策略
-- Claude 会在每次回答后，视情况将重要知识点整理到此笔记
-- 本文件是用户的学习笔记，记录核心概念和学习路径
+## 核心概念
 
-## 文档来源
-- 本地镜像: `claude-code-docs/` 目录
-- 原始来源: https://docs.anthropic.com/en/docs/claude-code/
-- 共 70 个文档文件
+Claude Code 是 AI 驱动的编程助手，支持多平台（Terminal/VS Code/Desktop/Web/JetBrains）。
 
-## 核心结构 (10大类别)
+### 关键约束：上下文窗口
 
-### 2. 核心功能
-- commands.md (斜杠命令)
-- tools-reference.md (工具参考: Read/Edit/Grep/Bash等)
-- cli-reference.md (CLI命令行)
-- permissions.md / permission-modes.md (权限系统)
-- sandboxing.md (沙箱机制)
+**上下文会快速填满，性能随之下降。** 包含：所有消息、读取的文件、命令输出。
 
-### 3. 高级功能 ⭐重点
-- agent-teams.md, sub-agents.md (Agent协作)
-- hooks.md / hooks-guide.md (钩子系统)
-- mcp.md (Model Context Protocol)
-- memory.md (记忆系统)
-- skills.md (技能系统)
-- plugins.md (插件系统)
-- scheduled-tasks.md (定时任务)
+**管理策略**：
+- 频繁 `/clear` 在无关任务间
+- 用 subagents 做大量文件探索
+- 同一问题纠正 2 次后，重新开始
 
-### 4. 配置与个性化
-- settings.md, env-vars.md, model-config.md
-- keybindings.md, output-styles.md
+---
 
-### 5. IDE/编辑器集成
-- vs-code.md, jetbrains.md, chrome.md
-- desktop.md, remote-control.md
+## 最佳实践
 
-### 6. 平台与部署
-- headless.md (无头模式)
-- github-actions.md, gitlab-ci-cd.md
-- devcontainer.md
+### 1. 让 Claude 能验证工作
 
-### 7. 云服务提供商
-- amazon-bedrock.md, google-vertex-ai.md
-- microsoft-foundry.md, llm-gateway.md
+提供测试用例、预期输出、截图对比。这是最高优先级。
 
-### 8. 监控与分析
-- analytics.md, monitoring-usage.md, costs.md
+| 差的提示 | 好的提示 |
+|---------|---------|
+| "实现邮箱验证函数" | "写 validateEmail，测试：user@example.com=true, user@.com=false。实现后运行测试" |
+| "让仪表盘更好看" | "[截图] 实现此设计。截图对比，列出差异并修复" |
 
-### 9. 安全与合规
-- security.md, data-usage.md, authentication.md
-- zero-data-retention.md
+### 2. 工作流：探索 → 计划 → 实现 → 提交
 
-### 10. 其他
-- troubleshooting.md, changelog.md
-- best-practices.md, common-workflows.md
+1. **探索**（Plan Mode）：理解代码，不做修改
+2. **计划**：创建详细计划，`Ctrl+G` 可在编辑器编辑
+3. **实现**（Normal Mode）：按计划编码，验证结果
+4. **提交**：提交并创建 PR
 
-## 学习路径建议
-1. 先看: quickstart.md + overview.md
-2. 核心: tools-reference.md + commands.md
-3. 进阶: sub-agents.md + hooks.md + memory.md + skills.md
-4. 实践: best-practices.md + common-workflows.md
+**跳过计划**：改动小（修复 typo、重命名变量）
+
+### 3. 提示技巧
+
+- `@文件名` - 引用文件
+- 粘贴截图/图片
+- 指向现有代码模式
+- 描述症状而非诊断
+
+---
+
+## CLAUDE.md
+
+**位置**：`./CLAUDE.md`（项目级）或 `~/.claude/CLAUDE.md`（全局）
+
+**生成**：`/init`
+
+**黄金法则**：**简洁！** 每行问："删除这行会让 Claude 犯错吗？"
+
+| ✅ 包含 | ❌ 排除 |
+|--------|--------|
+| 猜不到的 bash 命令 | 标准语言约定 |
+| 项目特定代码风格 | 详细 API 文档 |
+| 测试指令和偏好工具 | 频繁变化的信息 |
+| 常见陷阱 | "写干净代码" |
+
+**可导入其他文件**：
+```markdown
+See @README.md
+Git workflow: @docs/git-instructions.md
+```
+
+---
+
+## 扩展功能
+
+### Hooks（.claude/settings.json）
+确定性执行，如编辑后自动运行 eslint。
+
+### Skills（.claude/skills/<name>/SKILL.md）
+可复用工作流，用 `/skill-name` 调用。
+
+### Subagents（.claude/agents/<name>.md）
+独立上下文，适合大量文件探索。
+
+### MCP（claude mcp add）
+连接外部工具（Notion、Figma、数据库）。
+
+---
+
+## 会话管理
+
+| 命令 | 作用 |
+|------|------|
+| `Esc` | 停止当前动作 |
+| `Esc + Esc` / `/rewind` | 回退到检查点 |
+| `/clear` | 重置上下文 |
+| `/btw` | 快捷问题（不污染上下文） |
+| `/compact` | 手动压缩上下文 |
+| `claude --continue` | 继续最近对话 |
+| `claude --resume` | 选择会话恢复 |
+
+---
+
+## 自动化
+
+### 非交互模式
+```bash
+claude -p "解释这个项目"
+claude -p "列出 API" --output-format json
+```
+
+### Auto Mode
+```bash
+claude --permission-mode auto -p "fix all lint errors"
+```
+
+### 批量处理
+```bash
+for file in $(cat files.txt); do
+  claude -p "Migrate $file" --allowedTools "Edit,Bash(git commit *)"
+done
+```
+
+---
+
+## 常见失败模式
+
+| 模式 | 解决 |
+|------|------|
+| 任务混杂 | `/clear` |
+| 反复纠正 | `/clear` + 更好的提示 |
+| CLAUDE.md 太长 | 无情删减 |
+| 无法验证 | 始终提供测试/脚本/截图 |
+| 无限探索 | 限定范围或用 subagents |
+
+---
+
+## 文档索引（70个文档）
+
+### 核心
+- `quickstart.md` - 快速入门
+- `tools-reference.md` - 工具参考
+- `commands.md` - 斜杠命令
+- `cli-reference.md` - CLI参考
+
+### 高级功能
+- `sub-agents.md` - 子Agent
+- `agent-teams.md` - Agent团队
+- `hooks.md` / `hooks-guide.md` - 钩子
+- `mcp.md` - Model Context Protocol
+- `memory.md` - 记忆系统
+- `skills.md` - 技能系统
+
+### 实践
+- `best-practices.md` - 最佳实践（✓ 已学）
+- `common-workflows.md` - 常见工作流
+- `how-claude-code-works.md` - 工作原理
+
+---
+
+## 四、Subagents（子 Agent）
+
+### 核心概念
+
+Subagent 是**运行在独立上下文中的专用 AI 助手**，有自己的系统提示、工具权限和模型配置。
+
+**关键区别**：
+- **Subagents**：单会话内使用，主 Agent 协调
+- **Agent Teams**：跨会话并行运行，互相通信
+
+### 内置 Subagents
+
+| Subagent | 模型 | 工具 | 用途 |
+|----------|------|------|------|
+| **Explore** | Haiku | Read-only | 代码搜索、代码库探索 |
+| **Plan** | 继承 | Read-only | Plan Mode 下的代码研究 |
+| **general-purpose** | 继承 | 全部 | 复杂多步任务 |
+
+### 创建 Subagent
+
+**文件位置**（优先级从高到低）：
+| 位置 | 范围 |
+|------|------|
+| `--agents` CLI flag | 当前会话 |
+| `.claude/agents/` | 当前项目 |
+| `~/.claude/agents/` | 所有项目 |
+
+**文件格式**：
+```markdown
+---
+name: code-reviewer
+description: Reviews code for quality  # Claude 用这决定是否委托
+tools: Read, Grep, Glob              # 允许的工具
+model: sonnet                        # sonnet/opus/haiku/inherit
+permissionMode: default              # default/acceptEdits/dontAsk/bypassPermissions/plan
+memory: user                         # 持久记忆: user/project/local
+background: false                    # 是否后台运行
+---
+You are a code reviewer. Analyze code and provide feedback...
+```
+
+### Frontmatter 字段
+
+| 字段 | 说明 |
+|------|------|
+| `name` | 唯一标识符（必需） |
+| `description` | Claude 用它决定是否委托（必需） |
+| `tools` | 允许的工具（默认继承全部） |
+| `disallowedTools` | 禁止的工具 |
+| `model` | 模型选择 |
+| `permissionMode` | 权限模式 |
+| `skills` | 预加载的技能 |
+| `mcpServers` | MCP 服务器 |
+| `hooks` | 生命周期钩子 |
+| `memory` | 跨会话记忆 |
+
+### 调用方式
+
+```text
+# 1. 自然语言（Claude 自动决定）
+Use a subagent to review this code for security issues
+
+# 2. @-提及（确保使用特定 subagent）
+@"code-reviewer (agent)" look at the auth changes
+
+# 3. 整个会话作为 Subagent
+claude --agent code-reviewer
+
+# 4. 设置默认
+# .claude/settings.json: { "agent": "code-reviewer" }
+```
+
+### 前后台运行
+
+- **前台**：阻塞主会话，可交互权限提示
+- **后台**：并发运行，需预授权权限
+
+```text
+run this in the background  # 让 Claude 后台运行
+Ctrl+B                    # 将运行中任务转为后台
+```
+
+### 典型模式
+
+| 场景 | 示例 |
+|------|------|
+| **隔离高输出** | `Use a subagent to run tests and report only failures` |
+| **并行研究** | `Research auth, database, and API in parallel using subagents` |
+| **链式调用** | `Use code-reviewer to find issues, then optimizer to fix them` |
+
+**何时用 Subagent**：
+- 产生大量输出（测试、日志）
+- 需要强制工具限制
+- 任务自包含，返回摘要
+
+### 示例
+
+**Code Reviewer**（只读）：
+```yaml
+name: code-reviewer
+description: Expert code review specialist. Use proactively after writing code.
+tools: Read, Grep, Glob, Bash  # 无 Edit/Write
+```
+
+**Debugger**（可修改）：
+```yaml
+name: debugger
+description: Debugging specialist. Use proactively when issues occur.
+tools: Read, Edit, Bash, Grep, Glob
+```
+
+---
+
+
+*笔记更新: 2026-03-26*

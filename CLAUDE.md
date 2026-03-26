@@ -25,6 +25,8 @@ This is a **Claude Code learning project**. The repository contains:
 
 ## Key Conventions
 
+Always update note.md if new knowledge does not appear in it. 
+
 ### When User Asks About Documentation
 
 1. **Check `note.md` first** - User may have already made observations
