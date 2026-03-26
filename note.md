@@ -326,7 +326,124 @@ description: Debugging specialist. Use proactively when issues occur.
 tools: Read, Edit, Bash, Grep, Glob
 ```
 
----
 
+
+
+## 五、MCP（Model Context Protocol）
+
+### 核心概念
+
+**MCP 是连接 Claude Code 与外部工具和数据的开放标准协议。**
+
+通过 MCP，Claude 可以：
+- 读取 Jira/GitHub issue
+- 查询 PostgreSQL 数据库
+- 获取 Sentry 错误报告
+- 读取 Figma 设计
+- 发送 Slack 消息
+
+### 添加 MCP 服务器
+
+**三种传输方式**：
+
+| 方式 | 命令示例 |
+|------|----------|
+| **HTTP**（推荐） | `claude mcp add --transport http notion https://mcp.notion.com/mcp` |
+| **stdio**（本地） | `claude mcp add --transport stdio db -- npx -y @bytebase/dbhub --dsn "postgresql://..."` |
+| **SSE**（已弃用） | `claude mcp add --transport sse asana https://mcp.asana.com/sse` |
+
+**注意**：选项必须放在服务器名之前，`--` 后才是服务器命令。
+
+### 作用域
+
+| 作用域 | 存储 | 场景 |
+|--------|------|------|
+| **local** (默认) | `~/.claude.json` | 个人、敏感凭证 |
+| **project** | `.mcp.json` | 团队协作，可提交 git |
+| **user** | `~/.claude.json` | 跨项目使用 |
+
+```bash
+claude mcp add --scope project --transport http github https://api.githubcopilot.com/mcp/
+```
+
+### 管理命令
+
+```bash
+claude mcp list          # 列出服务器
+claude mcp get <name>    # 查看详情
+claude mcp remove <name> # 删除
+/mcp                     # 会话内查看状态和认证
+```
+
+### 认证
+
+**OAuth 2.0**：
+```bash
+# 1. 添加服务器
+claude mcp add --transport http sentry https://mcp.sentry.dev/mcp
+
+# 2. 会话内认证
+/mcp  # 选择服务器并完成浏览器登录
+```
+
+**预配置 OAuth**（非动态注册）：
+```bash
+claude mcp add --transport http --client-id ID --client-secret --callback-port 8080 my-server URL
+```
+
+### 配置示例
+
+**.mcp.json**（支持环境变量展开）：
+```json
+{
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/"
+    },
+    "api": {
+      "type": "http",
+      "url": "${API_URL:-https://api.example.com}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${API_KEY}"
+      }
+    }
+  }
+}
+```
+
+### 使用
+
+添加后直接用自然语言：
+```text
+What's the most common error in Sentry in the last 24 hours?
+Show me open PRs assigned to me on GitHub
+Query total revenue this month from PostgreSQL
+```
+
+**引用 MCP 资源**：
+```text
+Can you analyze @github:issue://123 and suggest a fix?
+Compare @postgres:schema://users with @docs:file://database/user-model
+```
+
+### 高级功能
+
+| 功能 | 说明 |
+|------|------|
+| **Tool Search** | MCP 工具超过上下文 10% 时自动按需加载。控制：`ENABLE_TOOL_SEARCH=auto:5` |
+| **Channels** | MCP 服务器可向会话推送消息（CI结果、监控告警） |
+| **Prompts** | MCP 暴露的 prompts 可作为命令 `/mcp__server__prompt` |
+| **Elicitation** | 服务器可请求用户输入（表单或浏览器认证） |
+
+### 环境变量
+
+| 变量 | 作用 |
+|------|------|
+| `MAX_MCP_OUTPUT_TOKENS` | MCP 输出上限（默认 25000） |
+| `ENABLE_TOOL_SEARCH` | 工具搜索：auto/true/false |
+| `MCP_TIMEOUT` | MCP 服务器启动超时 |
+
+---
 
 *笔记更新: 2026-03-26*
