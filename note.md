@@ -683,4 +683,185 @@ Compare @postgres:schema://users with @docs:file://database/user-model
 
 ---
 
+## 六、Skills（技能）
+
+### 核心概念
+
+**Skills 是用 `SKILL.md` 文件扩展 Claude 的能力，相当于自定义 `/命令`。**
+
+Claude Code skills 遵循 [Agent Skills](https://agentskills.io) 开放标准。
+
+**与旧版 commands 的关系**：`.claude/commands/deploy.md` 和 `.claude/skills/deploy/SKILL.md` 效果相同，但 skills 支持更多功能（frontmatter 控制、辅助文件目录等）。
+
+### 存储位置
+
+| 位置 | 路径 | 范围 |
+|------|------|------|
+| Enterprise | 托管设置 | 组织所有用户 |
+| **Personal** | `~/.claude/skills/<name>/SKILL.md` | 所有项目 |
+| **Project** | `.claude/skills/<name>/SKILL.md` | 仅当前项目 |
+| Plugin | `<plugin>/skills/<name>/SKILL.md` | 插件启用处 |
+
+优先级：Enterprise > Personal > Project
+
+### 基本结构
+
+```
+my-skill/
+├── SKILL.md           # 主文件（必需）
+├── template.md        # 模板（可选）
+├── examples/          # 示例（可选）
+└── scripts/           # 脚本（可选）
+```
+
+### SKILL.md 格式
+
+```yaml
+---
+name: explain-code
+description: Explains code with visual diagrams. Use when explaining how code works.
+disable-model-invocation: true   # 仅手动调用
+allowed-tools: Read, Grep       # 限制工具
+context: fork                   # 在子 agent 运行
+agent: Explore                  # 指定子 agent 类型
+---
+
+When explaining code, always include:
+1. **Analogy**: Compare to everyday life
+2. **Diagram**: Use ASCII art
+3. **Step-by-step walkthrough**
+```
+
+### Frontmatter 字段
+
+| 字段 | 说明 |
+|------|------|
+| `name` | 技能名称（也是 `/命令名`） |
+| `description` | Claude 用它决定是否自动加载 ⭐重要 |
+| `disable-model-invocation` | `true`=仅手动调用（如部署类技能） |
+| `user-invocable` | `false`=仅 Claude 调用，用户不可见 |
+| `allowed-tools` | 限制可用工具 |
+| `model` | 指定模型 |
+| `effort` | 努力程度：`low`/`medium`/`high`/`max` |
+| `context: fork` | 在隔离子 agent 中运行 |
+| `agent` | 子 agent 类型：`Explore`/`Plan`/`general-purpose` |
+| `argument-hint` | 参数提示，如 `[issue-number]` |
+
+### 调用方式
+
+| 方式 | 示例 |
+|------|------|
+| **自动加载** | 描述匹配用户请求时 Claude 自动调用 |
+| **直接调用** | `/explain-code src/auth.ts` |
+| **@-提及** | `"@explain-code look at this"` |
+
+### 参数传递
+
+使用占位符接收参数：
+
+```yaml
+---
+name: fix-issue
+description: Fix a GitHub issue
+disable-model-invocation: true
+---
+
+Fix GitHub issue $ARGUMENTS:
+1. Read the issue
+2. Implement fix
+3. Write tests
+```
+
+运行 `/fix-issue 123`，`$ARGUMENTS` 会被替换为 `123`。
+
+**多参数**：
+- `$ARGUMENTS[0]` 或 `$0` - 第一个参数
+- `$ARGUMENTS[1]` 或 `$1` - 第二个参数
+
+### 动态上下文注入
+
+使用 `` !`<command>` `` 语法在 skill 加载前执行命令：
+
+```yaml
+---
+name: pr-summary
+description: Summarize a pull request
+context: fork
+---
+
+## PR Context
+- Diff: !`gh pr diff`
+- Comments: !`gh pr view --comments`
+- Files: !`gh pr diff --name-only`
+
+Summarize this PR...
+```
+
+命令输出会替换占位符，Claude 只看到最终结果。
+
+### 控制谁可以调用
+
+| Frontmatter | 用户可调用 | Claude 可自动调用 | 何时加载 |
+|-------------|-----------|------------------|----------|
+| (默认) | ✓ | ✓ | 描述常驻上下文，调用时加载完整内容 |
+| `disable-model-invocation: true` | ✓ | ✗ | 仅调用时加载 |
+| `user-invocable: false` | ✗ | ✓ | 描述常驻上下文，调用时加载完整内容 |
+
+### 内置 Skills（捆绑技能）
+
+| Skill | 用途 |
+|-------|------|
+| `/batch <instruction>` | 大规模并行代码变更 |
+| `/claude-api` | 加载 Claude API 参考 |
+| `/debug [description]` | 启用调试日志 |
+| `/loop [interval] <prompt>` | 定时重复执行 |
+| `/simplify [focus]` | 代码简化审查 |
+
+### 环境变量
+
+| 变量 | 说明 |
+|------|------|
+| `$ARGUMENTS` | 所有参数 |
+| `$ARGUMENTS[N]` / `$N` | 第 N 个参数（0-based） |
+| `${CLAUDE_SESSION_ID}` | 当前会话 ID |
+| `${CLAUDE_SKILL_DIR}` | Skill 目录路径 |
+
+### 典型使用场景
+
+**1. 参考型 Skill**（Claude 自动使用）
+```yaml
+name: api-conventions
+description: API design patterns for this codebase
+---
+When writing API endpoints:
+- Use RESTful naming
+- Return consistent errors
+```
+
+**2. 任务型 Skill**（仅手动调用）
+```yaml
+name: deploy
+description: Deploy to production
+disable-model-invocation: true
+---
+1. Run tests
+2. Build
+3. Push to production
+```
+
+**3. 隔离型 Skill**（在子 agent 运行）
+```yaml
+name: deep-research
+description: Research a topic thoroughly
+context: fork
+agent: Explore
+---
+Research $ARGUMENTS:
+1. Find files with Glob/Grep
+2. Analyze code
+3. Summarize findings
+```
+
+---
+
 *笔记更新: 2026-03-26*
